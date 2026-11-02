@@ -1,0 +1,7 @@
+*.pem
+*.tfstate
+*.tfstate.*
+.terraform/
+.env
+credentials
+.DS_Store
