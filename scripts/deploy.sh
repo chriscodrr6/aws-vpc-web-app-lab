@@ -42,3 +42,35 @@ PUB_RT=$PUB_RT
 EOF
 
 echo "VPC: $VPC_ID | Public: $PUB | Private: $PRIV_A, $PRIV_B | IGW: $IGW"
+
+# Phase 2: Security groups and web server
+
+MYIP=$(curl -s https://checkip.amazonaws.com)
+
+WEB_SG=$(aws ec2 create-security-group --group-name lab-web-sg --description "Web server" \
+  --vpc-id $VPC_ID --query GroupId --output text)
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 22 --cidr $MYIP/32
+
+DB_SG=$(aws ec2 create-security-group --group-name lab-db-sg --description "Database" \
+  --vpc-id $VPC_ID --query GroupId --output text)
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 3306 --source-group $WEB_SG
+
+# Key pair is stored outside the repo
+mkdir -p ~/.ssh
+aws ec2 create-key-pair --key-name lab-key --query KeyMaterial --output text > ~/.ssh/lab-key.pem
+chmod 400 ~/.ssh/lab-key.pem
+
+# Launch the web server (scripts/user-data.sh installs Apache)
+AMI=$(MSYS_NO_PATHCONV=1 aws ssm get-parameter \
+  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --query Parameter.Value --output text)
+
+INSTANCE_ID=$(aws ec2 run-instances --image-id $AMI --instance-type t3.micro --key-name lab-key \
+  --subnet-id $PUB --security-group-ids $WEB_SG --user-data file://scripts/user-data.sh \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=lab-web}]' \
+  --query 'Instances[0].InstanceId' --output text)
+
+aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
