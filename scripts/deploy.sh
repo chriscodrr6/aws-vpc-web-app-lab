@@ -74,3 +74,20 @@ INSTANCE_ID=$(aws ec2 run-instances --image-id $AMI --instance-type t3.micro --k
 aws ec2 wait instance-running --instance-ids $INSTANCE_ID
 PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID \
   --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+
+# Phase 3: Private RDS database
+
+aws rds create-db-subnet-group --db-subnet-group-name lab-db-subnets \
+  --db-subnet-group-description "Lab DB subnets" --subnet-ids $PRIV_A $PRIV_B
+
+read -s DBPASS   # type a password; never commit it
+
+aws rds create-db-instance --db-instance-identifier lab-db \
+  --db-instance-class db.t3.micro --engine mysql --allocated-storage 20 \
+  --master-username admin --master-user-password "$DBPASS" \
+  --db-subnet-group-name lab-db-subnets --vpc-security-group-ids $DB_SG \
+  --no-publicly-accessible --backup-retention-period 0
+
+aws rds wait db-instance-available --db-instance-identifier lab-db
+DB_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier lab-db \
+  --query 'DBInstances[0].Endpoint.Address' --output text)
